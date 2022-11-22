@@ -1,99 +1,66 @@
 import torch
 import torch.nn.functional as F
+from torch import nn
+from torch.nn import BatchNorm1d, ReLU, Linear, Sequential
 import numpy as np
 from torch_geometric.data import Data
-from torch_geometric.nn import GCNConv, Sequential
+from torch_geometric.nn import GCNConv, global_mean_pool, GATConv, GINConv, global_add_pool, SAGEConv, to_hetero, HeteroConv, GraphConv
 import os
-from torch import nn
-from torch_geometric.data import InMemoryDataset, download_url
+from torch.utils.data import DataLoader
+from torch_geometric.data import InMemoryDataset, download_url, HeteroData
 import networkx as nx
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import KFold
+
 from sklearn.preprocessing import StandardScaler
 
-class GCN(torch.nn.Module):
-    def __init__(self, hidden_channels):
-        super(GCN, self).__init__()
-        torch.manual_seed(12345)
-        self.conv1 = GraphConv(dataset.num_node_features, hidden_channels)
-        self.conv2 = GraphConv(hidden_channels, hidden_channels)
-        self.conv3 = GraphConv(hidden_channels, hidden_channels)
-        self.fc1 = nn.Linear(hidden_channels, 20)
-        self.fc2 = nn.Linear(20, 1)
+import matplotlib.pyplot as plt
 
-    def forward(self, x, edge_index):
-        #x = F.dropout(x, p=0.6, training=self.training)
-        x = self.conv1(x, edge_index)
-        x = F.elu(x)
-        #x = F.dropout(x, p=0.6, training=self.training)
-        x = self.conv2(x, edge_index)
-        
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+data = HeteroData()
+data['inst'].x = torch.FloatTensor(np.load("/home/zluo/nn/GNN/to_gnn/train_inst_X.npy"))
+data['net'].x = torch.FloatTensor(np.load("/home/zluo/nn/GNN/to_gnn/train_net_X.npy").reshape(-1, 1))
+data['net'].y = torch.FloatTensor(np.load("/home/zluo/nn/GNN/to_gnn/net_Y.npy").reshape(-1, 1))
+data['inst', 'to', 'net'].edge_index  =  torch.LongTensor(np.load("/home/zluo/nn/GNN/to_gnn/edgs_inst_to_net.npy").T)
+data['net', 'to', 'inst'].edge_index  =  torch.LongTensor(np.load("/home/zluo/nn/GNN/to_gnn/edgs_net_to_inst.npy").T)
+data['inst', 'to', 'inst'].edge_index  = torch.LongTensor(np.load("/home/zluo/nn/GNN/to_gnn/edge_index_train_inst.npy").T)
+
+class HeteroGNN(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, num_layers):
+        super().__init__()
+
+        self.convs = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            conv = HeteroConv({
+                ('inst', 'to', 'net'): GATConv((-1, -1), hidden_channels, add_self_loops=False, dropout=0.6),
+                ('net', 'to', 'inst'): GATConv((-1, -1), hidden_channels, add_self_loops=False, dropout=0.6),
+            }, aggr='sum')
+            self.convs.append(conv)
+
+        self.lin1 = Linear(hidden_channels, out_channels)
+        self.lin2 = Linear(out_channels, 1)
+
+    def forward(self, x_dict, edge_index_dict):
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {key: x.relu() for key, x in x_dict.items()}
+            
+        x = F.relu(self.lin1(x_dict['net']))
+        x = self.lin2(x)
         
         return x
     
     
-    
-class netlist_wl(InMemoryDataset):
-    def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
-        super().__init__(root, transform, pre_transform, pre_filter)
-        self.data, self.slices = torch.load(self.processed_paths[0])
-
-    @property
-    def raw_file_names(self):
-        return ['netlist_wl.gpickle']
-
-    @property
-    def processed_file_names(self):
-        return ['netlist_wl.pt']
-
-    def download(self):
-        pass
-
-    def process(self):
-        # Read data into huge `Data` list.
-        data_list = []
-
-        if self.pre_filter is not None:
-            data_list = [data for data in data_list if self.pre_filter(data)]
-
-        if self.pre_transform is not None:
-            data_list = [self.pre_transform(data) for data in data_list]
-
-        X = np.load("/home/zluo/nn/GNN/graph_X.npy", allow_pickle=True)
-        X = StandardScaler().fit_transform(X)
-        y = np.load("/home/zluo/nn/GNN/graph_y.npy", allow_pickle=True)
-        y = y.reshape(len(y), 1)
-        edge_index = np.load("/home/zluo/nn/GNN/edge_index.npy")
-        X = torch.tensor(X, dtype=torch.float)
-        y = torch.tensor(y, dtype=torch.float)
-        edge_index = torch.tensor(edge_index.T, dtype=torch.long)
-        gp_data = Data(x=X, y=y, edge_index=edge_index)
-        data_list.append(gp_data)
-            
-        data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[0])
-        
-        
-        
-dataset = netlist_wl("/home/zluo/nn/gnn/")
-data = dataset[0]
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = torch.load("/home/zluo/nn/GNN/trained.pt")
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+model = HeteroGNN(hidden_channels=32, out_channels=10, num_layers=3)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.MSELoss()
 
 
-def train():
-    model.train()
-    optimizer.zero_grad()  # Clear gradients.
-    out = model(data.x, data.edge_index)  # Perform a single forward pass.
-    loss = criterion(out, data.y)  # Compute the loss solely based on the training nodes.
-    loss.backward()  # Derive gradients.
-    optimizer.step()  # Update parameters based on gradients.
-    return loss
-
 with open("/home/zluo/nn/GNN/wl.log", "w", buffering=1) as f:
     for epoch in range(1, 10000):
-        loss = train()
+        model.train()
+        out = model(data.x_dict, data.edge_index_dict)
+        loss = criterion(out, data['net'].y)
+        loss.backward()
+        optimizer.step()
         f.write(f'Epoch: {epoch:03d}, Loss: {loss:.4f}\n')

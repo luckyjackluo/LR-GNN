@@ -1,0 +1,4 @@
+{
+    "dockerhub-id": "luckyjackluo/long-range-interaction",
+    "build-script": "python run.py"
+}
