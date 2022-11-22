@@ -1,0 +1,16 @@
+#!/bin/bash
+#SBATCH --job-name="gpu-nn-conj"
+#SBATCH --output="gpu-nn_conj.out"
+#SBATCH -p gpu-shared
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=10
+#SBATCH --gpus=1
+#SBATCH --mem=16G
+#SBATCH -A slc103
+#SBATCH --time=24:00:00
+
+module load slurm
+module load gpu
+module load gcc openmpi fftw
+
+python gin.py
