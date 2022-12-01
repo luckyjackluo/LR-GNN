@@ -1,0 +1,1 @@
+This file contain the numpy idx file used to sample from the large dataset to test. 
