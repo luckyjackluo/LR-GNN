@@ -20,7 +20,11 @@ RUN pip install pytorch
 
 RUN pip install pyg-lib torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-1.13.0+cpu.html
 
+RUN pip install dgl dglgo -f https://data.dgl.ai/wheels/repo.html
+
 RUN pip install ogb
+
+RUN pip install networkx[default]
 
 # Override command to disable running jupyter notebook at launch
 CMD ["/bin/bash"]

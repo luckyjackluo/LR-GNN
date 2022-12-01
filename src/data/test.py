@@ -12,6 +12,7 @@ def load_dataset(save_path, n):
 
     dataset = PeptidesFunctionalDataset(save_path)
     idx_lst = np.random.choice([i for i in range(len(dataset))], size=n, replace=False)
+    np.save("test/testdata/data_idx.npy", idx_lst)
     dataset = dataset[idx_lst]
     
     Y = []
